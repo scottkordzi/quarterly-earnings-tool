@@ -24,7 +24,7 @@ jobs:
          registry: ${{ secrets.ECR_REGISTRY }}
          repo: ${{ env.ECR_REPOSITORY }}
          region: ${{ env.AWS_REGION }}
-         tags: ${{ github.run_number }}
+         tags: latest,${{ github.run_number }},build-${{ github.sha }}
          daemon_off: false
          dockerfile: ./Dockerfile
          context: ./
@@ -75,8 +75,8 @@ jobs:
         - name: Create values file
           run: |
             cat <<EOF > helm-values.yaml
-            appimage: ${{ secrets.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
-            apptag: ${{ github.run_number }}
+            appimage: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}
+            apptag: ${{ github.run_number }}-${{ github.sha }}  # ← Use same unique tag
             mysql:
               rootPassword: "contactform-rootpass" #! Need to replace these with Github secrets
               user: "contactformdb-admin" #! Need to replace these with Github secrets

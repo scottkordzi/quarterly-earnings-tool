@@ -1,8 +1,5 @@
 # Workflow Name
-#! Can be whatever the repo-name is + "-infrastructure"
-name: quarterly-earnings-tool-infrastructure
-#! Halfway done example -- don't want it to be a Github variable
-# name: ${{vars.REPOSITORY_NAME}}-infrastructure
+name: ${{ github.event.repository.name }}-infrastructure
 
 # Workflow Triggers
 # on:
@@ -32,7 +29,7 @@ env:
   S3_BUCKET: ${{ secrets.S3_BUCKET }}
   AWS_REGION: ${{ vars.AWS_REGION }}
   EKS_CLUSTER: ${{ vars.EKS_CLUSTER }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }} #! made it a global ENV variable
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
 
 
 # Define Jobs
@@ -40,7 +37,7 @@ jobs:
   terraform:
     name: "Create Infra with Terraform on AWS"
     runs-on: ubuntu-latest
-    timeout-minutes: 45  #! added for efficiency
+    timeout-minutes: 45
     # Run only on push events
     if: github.event.inputs.action == 'apply'
 
@@ -81,7 +78,7 @@ jobs:
 
       - name: Terraform init
         id: init
-        run: terraform init -backend-config="bucket=$S3_BUCKET"
+        run: terraform init -backend-config="bucket=${{ env.S3_BUCKET }}" -backend-config="key=terraform/state/terraform.tfstate"
 
       - name: Terraform validate
         id: validate
@@ -95,30 +92,6 @@ jobs:
       - name: Terraform plan status
         if: steps.plan.outcome == 'failure'
         run: exit 1
-
-      # - name: Import existing KMS resources
-      #   run: |
-      #     echo "Checking for existing KMS resources..."
-          
-      #     # Check if KMS alias exists
-      #     if aws kms describe-key --key-id "alias/eks/${{ env.EKS_CLUSTER }}-eks" &>/dev/null; then
-      #       echo "KMS alias exists, checking Terraform state..."
-            
-      #       # Check if already in Terraform state
-      #       if ! terraform state show 'module.eks.aws_kms_alias.this[0]' &>/dev/null; then
-      #         echo "Importing KMS alias..."
-      #         terraform import 'module.eks.aws_kms_alias.this[0]' "alias/eks/${{ env.EKS_CLUSTER }}-eks"
-      #       fi
-            
-      #       # Get the KMS key ID and import if needed
-      #       KEY_ID=$(aws kms describe-key --key-id "alias/eks/${{ env.EKS_CLUSTER }}-eks" --query 'KeyMetadata.KeyId' --output text)
-      #       if ! terraform state show 'module.eks.aws_kms_key.this[0]' &>/dev/null; then
-      #         echo "Importing KMS key..."
-      #         terraform import 'module.eks.aws_kms_key.this[0]' "$KEY_ID"
-      #       fi
-      #     else
-      #       echo "No existing KMS resources found."
-      #     fi
 
       - name: Terraform apply
         id: apply
@@ -187,32 +160,6 @@ jobs:
             
             echo "✅ Pre-destroy cleanup completed"
 
-      # - name: Install Ingress controller
-      #   if: steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
-      #   run: |
-      #     kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.2/deploy/static/provider/aws/deploy.yaml
-          
-      #     # Wait for ingress controller pods to be ready
-      #     echo "Waiting for Ingress controller to be ready..."
-      #     kubectl wait --namespace ingress-nginx \
-      #       --for=condition=ready pod \
-      #       --selector=app.kubernetes.io/component=controller \
-      #       --timeout=600s
-          
-      #     # Wait specifically for admission webhook to be ready
-      #     echo "Waiting for admission webhook to be ready..."
-      #     kubectl wait --namespace ingress-nginx \
-      #       --for=condition=available deployment/ingress-nginx-controller \
-      #       --timeout=300s
-          
-      #     # Give additional time for webhook service to be fully ready
-      #     echo "Giving webhook service additional time to initialize..."
-      #     sleep 60
-          
-      #     # Verify endpoints are available
-      #     kubectl get endpoints -n ingress-nginx ingress-nginx-controller-admission
-      #     echo "Ingress controller is ready!"
-
       - name: Install ArgoCD
         if: steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
         run: |
@@ -237,7 +184,6 @@ jobs:
   
           echo "ArgoCD installation completed."
       
-      #! Rather than PRINT password, NEED to store it somewhere we can safely access it 
       - name: Get ArgoCD access info
         if: steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
         id: argocd_info
@@ -301,186 +247,7 @@ jobs:
           echo "### Alternative: Direct kubectl command:" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo "kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARYy
-      ##########! ADD BACK IN IF WE USE INGRESS CONTROLLER ##########
-      # - name: Create ArgoCD Ingress (with retry logic)
-      #   if: steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
-      #   run: |
-      #     # Retry logic for creating Ingress
-      #     for i in {1..5}; do
-      #       echo "Attempt $i to create ArgoCD Ingress..."
-            
-      #       if cat <<EOF | kubectl apply -f -
-      #     apiVersion: networking.k8s.io/v1
-      #     kind: Ingress
-      #     metadata:
-      #       name: argocd-server-ingress
-      #       namespace: argocd
-      #       annotations:
-      #         nginx.ingress.kubernetes.io/ssl-redirect: "true"
-      #     spec:
-      #       ingressClassName: nginx
-      #       rules:
-      #       - host: argocd.${{ env.EKS_CLUSTER }}.local
-      #         http:
-      #           paths:
-      #           - path: /
-      #             pathType: Prefix
-      #             backend:
-      #               service:
-      #                 name: argocd-server
-      #                 port:
-      #                   number: 443
-      #     EOF
-      #       then
-      #         echo "ArgoCD Ingress created successfully!"
-      #         break
-      #       else
-      #         echo "Failed to create Ingress, waiting 30 seconds before retry..."
-      #         sleep 30
-      #       fi
-      #     done
-          
-      #     # Get access information
-      #     echo "Getting ArgoCD access information..."
-      #     kubectl get ingress -n argocd
-          
-      #     # Get admin password
-      #     echo "ArgoCD admin password:"
-      #     kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d || echo "Password not ready yet"
-      #     echo ""
-      
-      #! We right now don't have a DOMAIN NAME –– look into how to automate the creation of a HOSTED ZONE
-      # - name: Setup Route53 DNS for ArgoCD (Automated)
-      #  if: steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
-      #  id: route53_setup
-      #  run: |
-      #    # Define domain name (you can make this a variable)
-      #    DOMAIN_NAME="${{ vars.DOMAIN_NAME || format('{0}.aws.dev', env.EKS_CLUSTER) }}"
-      #    SUBDOMAIN="argocd.${DOMAIN_NAME}"
-      #    
-      #    echo "Setting up DNS for: $SUBDOMAIN"
-      #    
-      #    # Check if hosted zone already exists
-      #    EXISTING_ZONE=$(aws route53 list-hosted-zones-by-name --dns-name "$DOMAIN_NAME" --query "HostedZones[?Name=='${DOMAIN_NAME}.'].Id" --output text)
-      #    
-      #    if [ -z "$EXISTING_ZONE" ] || [ "$EXISTING_ZONE" = "None" ]; then
-      #      echo "Creating new hosted zone for: $DOMAIN_NAME"
-      #      
-      #      # Create hosted zone
-      #      HOSTED_ZONE_RESPONSE=$(aws route53 create-hosted-zone \
-      #        --name "$DOMAIN_NAME" \
-      #        --caller-reference "$(date +%s)-${{ env.EKS_CLUSTER }}" \
-      #        --hosted-zone-config Comment="Hosted zone for ${{ env.EKS_CLUSTER }} ArgoCD")
-      #      
-      #      HOSTED_ZONE_ID=$(echo "$HOSTED_ZONE_RESPONSE" | jq -r '.HostedZone.Id' | sed 's|/hostedzone/||')
-      #      
-      #      # Get name servers
-      #      NAME_SERVERS=$(echo "$HOSTED_ZONE_RESPONSE" | jq -r '.DelegationSet.NameServers[]' | tr '\n' ' ')
-      #      
-      #      echo "✅ Created hosted zone: $HOSTED_ZONE_ID"
-      #      echo "📋 Name servers: $NAME_SERVERS"
-      #      echo ""
-      #      echo "🚨 IMPORTANT: Update your domain registrar with these name servers:"
-      #      echo "$NAME_SERVERS" | tr ' ' '\n' | sed 's/^/  - /'
-      #      echo ""
-      #      
-      #    else
-      #      HOSTED_ZONE_ID=$(echo "$EXISTING_ZONE" | sed 's|/hostedzone/||')
-      #      echo "✅ Using existing hosted zone: $HOSTED_ZONE_ID"
-      #    fi
-      #    
-      #    # Store zone info as outputs
-      #    echo "hosted_zone_id=$HOSTED_ZONE_ID" >> $GITHUB_OUTPUT
-      #    echo "domain_name=$DOMAIN_NAME" >> $GITHUB_OUTPUT
-      #    echo "subdomain=$SUBDOMAIN" >> $GITHUB_OUTPUT
-      #    
-      #    # Get the LoadBalancer hostname (not from ingress since we're using LoadBalancer service)
-      #    echo "Waiting for LoadBalancer DNS to be ready..."
-      #    for i in {1..30}; do
-      #      LB_HOSTNAME=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
-      #      if [ ! -z "$LB_HOSTNAME" ] && [ "$LB_HOSTNAME" != "pending" ]; then
-      #        echo "LoadBalancer ready: $LB_HOSTNAME"
-      #        break
-      #      fi
-      #      echo "Waiting for LoadBalancer... ($i/30)"
-      #      sleep 10
-      #    done
-      #    
-      #    if [ -z "$LB_HOSTNAME" ] || [ "$LB_HOSTNAME" = "pending" ]; then
-      #      echo "❌ LoadBalancer not ready, skipping DNS setup"
-      #      exit 0
-      #    fi
-      #    
-      #    # Create/Update DNS record
-      #    echo "Creating DNS record: $SUBDOMAIN -> $LB_HOSTNAME"
-      #    
-      #    CHANGE_BATCH=$(cat <<EOF
-      #    {
-      #      "Changes": [{
-      #        "Action": "UPSERT",
-      #        "ResourceRecordSet": {
-      #          "Name": "$SUBDOMAIN",
-      #          "Type": "CNAME",
-      #          "TTL": 300,
-      #          "ResourceRecords": [{"Value": "$LB_HOSTNAME"}]
-      #        }
-      #      }]
-      #    }
-      #    EOF
-      #    )
-      #    
-      #    CHANGE_ID=$(aws route53 change-resource-record-sets \
-      #      --hosted-zone-id "$HOSTED_ZONE_ID" \
-      #      --change-batch "$CHANGE_BATCH" \
-      #      --query 'ChangeInfo.Id' --output text)
-      #    
-      #    echo "✅ DNS record created/updated. Change ID: $CHANGE_ID"
-      #    
-      #    # Wait for DNS propagation
-      #    echo "Waiting for DNS propagation..."
-      #    aws route53 wait resource-record-sets-changed --id "$CHANGE_ID"
-      #    echo "✅ DNS propagation complete"
-      #    
-      #    # Store the final URL
-      #    echo "argocd_dns_url=https://$SUBDOMAIN" >> $GITHUB_OUTPUT
-      #    
-      #    echo ""
-      #    echo "🎉 ArgoCD will be accessible at: https://$SUBDOMAIN"
-      #    echo "⏳ DNS propagation may take a few minutes to complete globally"
-#
-      #! Update the deployment summary to include DNS information
-      #- name: Create deployment summary
-      #  if: steps.argocd_info.outcome == 'success'
-      #  run: |
-      #    echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
-      #    echo "" >> $GITHUB_STEP_SUMMARY
-      #    echo "### ArgoCD Access Information" >> $GITHUB_STEP_SUMMARY
-      #    
-      #    # Add DNS URL if available
-      #    if [ ! -z "${{ steps.route53_setup.outputs.argocd_dns_url }}" ]; then
-      #      echo "- **DNS URL**: ${{ steps.route53_setup.outputs.argocd_dns_url }} 🌐" >> $GITHUB_STEP_SUMMARY
-      #    fi
-      #    
-      #    echo "- **Direct URL**: ${{ steps.argocd_info.outputs.argocd_url }}" >> $GITHUB_STEP_SUMMARY
-      #    echo "- **Username**: admin" >> $GITHUB_STEP_SUMMARY
-      #    echo "- **Password**: Stored in AWS Secrets Manager" >> $GITHUB_STEP_SUMMARY
-      #    echo "- **Secret Name**: \`argocd-${{ env.EKS_CLUSTER }}-credentials\`" >> $GITHUB_STEP_SUMMARY
-      #    echo "" >> $GITHUB_STEP_SUMMARY
-      #    
-      #    # Add DNS information if hosted zone was created
-      #    if [ ! -z "${{ steps.route53_setup.outputs.hosted_zone_id }}" ]; then
-      #      echo "### 📡 DNS Information" >> $GITHUB_STEP_SUMMARY
-      #      echo "- **Domain**: ${{ steps.route53_setup.outputs.domain_name }}" >> $GITHUB_STEP_SUMMARY
-      #      echo "- **Hosted Zone ID**: ${{ steps.route53_setup.outputs.hosted_zone_id }}" >> $GITHUB_STEP_SUMMARY
-      #      echo "- **Subdomain**: ${{ steps.route53_setup.outputs.subdomain }}" >> $GITHUB_STEP_SUMMARY
-      #      echo "" >> $GITHUB_STEP_SUMMARY
-      #    fi
-      #    
-      #    echo "### How to retrieve the password:" >> $GITHUB_STEP_SUMMARY
-      #    echo '```bash' >> $GITHUB_STEP_SUMMARY
-      #    echo "aws secretsmanager get-secret-value --secret-id argocd-${{ env.EKS_CLUSTER }}-credentials --region ${{ env.AWS_REGION }} --query SecretString --output text | jq -r '.password'" >> $GITHUB_STEP_SUMMARY
-      #    echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Configure ArgoCD Application
         if: steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
@@ -502,39 +269,6 @@ jobs:
           
           echo "ArgoCD Application created. You can view it in the ArgoCD UI."
 
-      - name: Delete ArgoCD LoadBalancer
-        if: failure()
-        run: |
-          echo "Cleaning up ArgoCD LoadBalancer..."
-          kubectl patch svc argocd-server -n argocd -p '{"spec":{"type":"ClusterIP"}}' --ignore-not-found=true || true
-          kubectl delete svc argocd-server -n argocd --ignore-not-found=true || true
-
-      - name: Delete ArgoCD
-        if: failure()
-        run: |
-          kubectl delete ingress argocd-server-ingress -n argocd --ignore-not-found=true
-          kubectl delete namespace argocd --ignore-not-found=true
-      
-      #############! Add back in if we use INGRESS CONTROLLER #############
-      # - name: Delete Ingress controller
-      #   if: failure()
-      #   run: |
-      #     kubectl delete -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.2/deploy/static/provider/aws/deploy.yaml
-
-      #- name: Empty ECR Repository
-      #  if: failure()
-      #  run: |
-      #    IMAGES=$(aws ecr list-images --repository-name ${{ env.ECR_REPOSITORY }} --query 'imageIds[*]' --output json)
-      #    if [[ "$IMAGES" != "[]" ]]; then
-      #      echo "Deleting images from ${{ env.ECR_REPOSITORY }}..."
-      #      aws ecr batch-delete-image --repository-name ${{ env.ECR_REPOSITORY }} --image-ids "$IMAGES"
-      #    else
-      #      echo "No images found in ${{ env.ECR_REPOSITORY }}."
-      #    fi
-
-        # aws ecr batch-delete-image --repository-name $REPOSITORY_NAME \
-        #     --image-ids "$(aws ecr list-images --repository-name $REPOSITORY_NAME --query 'imageIds[*]' --output json
-        # )" || true
 
       - name: Run Terraform destroy
         if: failure()
@@ -546,7 +280,7 @@ jobs:
   destroy:
     name: "Destroy Infra on AWS"
     runs-on: ubuntu-latest
-    timeout-minutes: 30  #! added for efficiency
+    timeout-minutes: 30
     # Only trigger for workflow_dispatch
     if: github.event.inputs.action == 'destroy'
 
@@ -564,7 +298,7 @@ jobs:
 
       - name: Terraform init
         id: init
-        run: terraform init -backend-config="bucket=$S3_BUCKET"
+        run: terraform init -backend-config="bucket=${{ env.S3_BUCKET }}" -backend-config="key=terraform/state/terraform.tfstate"
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -577,71 +311,65 @@ jobs:
         id: getconfig
         run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }} 
 
-      #! Add in if we automate the creation of a HOSTED ZONE  
-      #- name: Clean up Route53 DNS records
-      #  run: |
-      #    DOMAIN_NAME="${{ vars.DOMAIN_NAME || format('{0}.aws.dev', env.EKS_CLUSTER) }}"
-      #    SUBDOMAIN="argocd.${DOMAIN_NAME}"
-      #    
-      #    # Find the hosted zone
-      #    HOSTED_ZONE_ID=$(aws route53 list-hosted-zones-by-name --dns-name "$DOMAIN_NAME" --query "HostedZones[?Name=='${DOMAIN_NAME}.'].Id" --output text | sed 's|/hostedzone/||')
-      #    
-      #    if [ ! -z "$HOSTED_ZONE_ID" ] && [ "$HOSTED_ZONE_ID" != "None" ]; then
-      #      echo "Found hosted zone: $HOSTED_ZONE_ID"
-      #      
-      #      # Get the current CNAME record for ArgoCD
-      #      RECORD_SET=$(aws route53 list-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" \
-      #        --query "ResourceRecordSets[?Name=='${SUBDOMAIN}.']" --output json)
-      #      
-      #      if [ "$RECORD_SET" != "[]" ]; then
-      #        echo "Deleting DNS record for $SUBDOMAIN"
-      #        
-      #        # Extract the record details for deletion
-      #        RECORD_TYPE=$(echo "$RECORD_SET" | jq -r '.[0].Type')
-      #        RECORD_TTL=$(echo "$RECORD_SET" | jq -r '.[0].TTL')
-      #        RECORD_VALUES=$(echo "$RECORD_SET" | jq -r '.[0].ResourceRecords')
-      #        
-      #        # Delete the record
-      #        aws route53 change-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" --change-batch '{
-      #          "Changes": [{
-      #            "Action": "DELETE",
-      #            "ResourceRecordSet": {
-      #              "Name": "'$SUBDOMAIN'",
-      #              "Type": "'$RECORD_TYPE'",
-      #              "TTL": '$RECORD_TTL',
-      #              "ResourceRecords": '$RECORD_VALUES'
-      #            }
-      #          }]
-      #        }'
-      #        echo "✅ Deleted DNS record for $SUBDOMAIN"
-      #      else
-      #        echo "No DNS record found for $SUBDOMAIN"
-      #      fi
-      #      
-      #      # Optionally delete the hosted zone if you want (be careful!)
-      #      if [ "${{ vars.DELETE_HOSTED_ZONE }}" = "true" ]; then
-      #        # Check if only default records remain (NS and SOA)
-      #        RECORD_COUNT=$(aws route53 list-resource-record-sets --hosted-zone-id "$HOSTED_ZONE_ID" \
-      #          --query "length(ResourceRecordSets[?Type!='NS' && Type!='SOA'])" --output text)
-      #        
-      #        if [ "$RECORD_COUNT" = "0" ]; then
-      #          echo "Deleting hosted zone $HOSTED_ZONE_ID (only default records remain)"
-      #          aws route53 delete-hosted-zone --id "$HOSTED_ZONE_ID"
-      #          echo "✅ Deleted hosted zone"
-      #        else
-      #          echo "Hosted zone contains custom records, not deleting automatically"
-      #        fi
-      #      fi
-      #    else
-      #      echo "No hosted zone found for $DOMAIN_NAME"
-      #    fi
-
-
-      # # NEED to delete INGRESS CONTROLLER LOAD BALANCER **BEFORE** DELETING KUBERNETES CLUSTER
-      # - name: Delete Ingress controller
-      #   run: kubectl delete -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.2/deploy/static/provider/aws/deploy.yaml
-
-      # Also want to EMPTY ECR REPO of STORED IMAGES **BEFORE** IT IS DELETED
+      - name: Pre-destroy cleanup
+        run: |
+          echo "Starting comprehensive pre-destroy cleanup..."
+          
+          # Install jq if needed
+          sudo apt-get update && sudo apt-get install -y jq
+          
+          # Delete ArgoCD Application first
+          kubectl delete application quarterly-earnings-tool -n argocd --ignore-not-found=true --timeout=60s || true
+          
+          # Convert LoadBalancer to ClusterIP and delete namespace
+          kubectl patch svc argocd-server -n argocd -p '{"spec":{"type":"ClusterIP"}}' --ignore-not-found=true || true
+          sleep 30
+          kubectl delete namespace argocd --ignore-not-found=true --timeout=180s || true
+          
+          # Clean up LoadBalancers more efficiently
+          echo "Cleaning up LoadBalancers..."
+          
+          # Delete Application Load Balancers
+          aws elbv2 describe-load-balancers \
+            --query "LoadBalancers[?contains(LoadBalancerName, '${{ env.EKS_CLUSTER }}')].LoadBalancerArn" \
+            --output text | while read -r lb_arn; do
+            if [ ! -z "$lb_arn" ]; then
+              echo "Deleting ALB/NLB: $lb_arn"
+              aws elbv2 delete-load-balancer --load-balancer-arn "$lb_arn" || true
+            fi
+          done
+          
+          # Delete Classic Load Balancers
+          aws elb describe-load-balancers \
+            --query "LoadBalancerDescriptions[?contains(LoadBalancerName, '${{ env.EKS_CLUSTER }}')].LoadBalancerName" \
+            --output text | while read -r lb_name; do
+            if [ ! -z "$lb_name" ]; then
+              echo "Deleting Classic LB: $lb_name"
+              aws elb delete-load-balancer --load-balancer-name "$lb_name" || true
+            fi
+          done
+          
+          # Empty ECR Repository
+          if aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY }} &>/dev/null; then
+            IMAGES=$(aws ecr list-images --repository-name ${{ env.ECR_REPOSITORY }} --query 'imageIds[*]' --output json)
+            if [ "$IMAGES" != "[]" ]; then
+              echo "Deleting images from ${{ env.ECR_REPOSITORY }}..."
+              aws ecr batch-delete-image --repository-name ${{ env.ECR_REPOSITORY }} --image-ids "$IMAGES"
+            fi
+          fi
+          
+          # Delete AWS Secrets Manager secret
+          SECRET_NAME="argocd-${{ env.EKS_CLUSTER }}-credentials"
+          if aws secretsmanager describe-secret --secret-id "$SECRET_NAME" &>/dev/null; then
+            aws secretsmanager delete-secret --secret-id "$SECRET_NAME" --force-delete-without-recovery
+            echo "✅ Deleted secret: $SECRET_NAME"
+          fi
+          
+          # Single wait for all LoadBalancer cleanup
+          echo "Waiting 120s for LoadBalancer cleanup to complete..."
+          sleep 120
+          
+          echo "✅ Pre-destroy cleanup completed"
       
       - name: Extra AWS cleanup
         if: always()
