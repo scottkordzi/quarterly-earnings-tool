@@ -1,5 +1,5 @@
 # Workflow Name
-name: ${{ github.event.repository.name }}-infrastructure
+name: quarterly-earnings-tool-infrastructure # ${{ github.event.repository.name }}-infrastructure
 
 # Workflow Triggers
 # on:
