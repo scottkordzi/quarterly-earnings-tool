@@ -30,8 +30,12 @@ variable "public_subnet_cidr_blocks" {
   default = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 }
 
+# Tagging all resources created by Terraform
 variable "tags" {
+  type        = map(string)
   default = {
-    App = "eks-cluster"
+    "ManagedBy" = "terraform"
+    "Project"   = "quarterly-earnings-tool"
+    "Terraform" = "true"
   }
 }
