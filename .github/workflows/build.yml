@@ -125,7 +125,8 @@ jobs:
 
       - name: Terraform plan
         id: plan
-        run: terraform plan -no-color -input=false -out planfile # Workflow NOT interactive, simply generate PLAN for us
+        if: github.event.inputs.run_terraform_plan == 'true'
+        run: terraform plan -no-color -input=false -out planfile
         continue-on-error: true
 
       - name: Terraform plan status
@@ -134,6 +135,7 @@ jobs:
 
       - name: Terraform apply
         id: apply
+        if: github.event.inputs.run_terraform_apply == 'true' && (steps.plan.outcome == 'success' || steps.plan.outcome == 'skipped')
         run: terraform apply -auto-approve -input=false -parallelism=1 planfile # parallelism=1 means we want to run ONE STEP AT A TIME
 
       - name: Get Kubernetes config
@@ -186,7 +188,7 @@ jobs:
             echo "✅ Pre-destroy cleanup completed"
 
       - name: Install ArgoCD
-        if: steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
+        if: github.event.inputs.install_argocd == 'true' && steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
         run: |
           # Create argocd namespace
           kubectl create namespace argocd
@@ -210,7 +212,7 @@ jobs:
           echo "ArgoCD installation completed."
       
       - name: Get ArgoCD access info
-        if: steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
+        if: github.event.inputs.install_argocd == 'true' && steps.apply.outcome == 'success' && steps.getconfig.outcome == 'success'
         id: argocd_info
         run: |
           # Get ArgoCD status
@@ -254,7 +256,7 @@ jobs:
 
       # Add a step to create a GitHub summary with access information
       - name: Create deployment summary
-        if: steps.argocd_info.outcome == 'success'
+        if: github.event.inputs.install_argocd == 'true' && steps.argocd_info.outcome == 'success'
         run: |
           echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -331,6 +333,7 @@ jobs:
         run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }} 
 
       - name: Pre-destroy cleanup
+        if: github.event.inputs.run_pre_destroy_cleanup == 'true'
         run: |
           echo "Starting comprehensive pre-destroy cleanup..."
           
@@ -379,5 +382,5 @@ jobs:
       # FINALLY, we execute `terraform destroy ...` command
       - name: Terraform destroy
         id: destroy
-        if: always()
+        if: github.event.inputs.run_terraform_destroy == 'true'
         run: terraform destroy -auto-approve -input=false
